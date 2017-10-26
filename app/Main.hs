@@ -7,15 +7,15 @@ import           Control.Exception
 import           Control.Monad.State
 import           Control.Concurrent.MVar
 import           UI.HSCurses.Curses as Ncurses
-import           qualified System.Console.ANSI as ANSI
-import           System.Console.Terminal.Size
+import           UI.HSCurses.CursesHelper
+-- import           qualified System.Console.ANSI as ANSI
 import           System.IO
 import           System.Random
 
 class EqualsStringColors a where
     eq :: a -> Bool
 
-data ColorPrinter = ColorPrinter { getColor       :: ANSI.Color
+data ColorPrinter = ColorPrinter { getColor       :: BackgroundColor
                                  , getColorString :: String }
                     deriving (Show)
 
@@ -30,35 +30,35 @@ data GameEvent = EventKeyPress Player | EventExit | Continue String deriving (Eq
 instance EqualsStringColors ColorPrinter where
     eq (ColorPrinter color str) = colorToString color == str
 
-colorToString :: ANSI.Color -> String
-colorToString ANSI.Red    = "red"
-colorToString ANSI.Blue   = "blue"
-colorToString ANSI.Green  = "green"
-colorToString ANSI.Yellow = "yellow"
-colorToString ANSI.White  = "white"
+colorToString :: BackgroundColor -> String
+colorToString DarkRedB    = "red"
+colorToString DarkBlueB   = "blue"
+colorToString DarkGreenB  = "green"
+-- colorToString ANSI.Yellow = "yellow"
+colorToString WhiteB  = "white"
 
-listOfColors :: [ANSI.Color]
-listOfColors = [ANSI.Red, ANSI.Blue, ANSI.Green, ANSI.Yellow, ANSI.White]
+listOfColors :: [BackgroundColor]
+listOfColors = [DarkRedB, DarkGreenB, DarkBlueB,{- PurpleB,  DarkCyanB, -} WhiteB]
 
 listOfColorStrings :: [String]
-listOfColorStrings = ["red", "blue", "green", "yellow", "white"]
+listOfColorStrings = ["red", "blue", "green", "white"]
 
-printInCenter :: Show a => a -> Int -> IO ()
-printInCenter txt i = do
-    let str = show txt
-    (Just w) <- size
-    ANSI.clearFromCursorToScreenEnd
-    ANSI.setCursorPosition (height w `div` 2 + i) (width w `div` 2 - (length str `div` 2))
-    putStr str
+printInCenter :: Ncurses.Window -> String -> Int -> IO ()
+printInCenter w txt i = do
+    (height, width) <- scrSize  
+    move (height `div` 2 + i) (width `div` 2 - (length txt `div` 2))
+    wRefresh w
+    wAddStr w txt
+    wRefresh w
 
-paintColorText :: ColorPrinter -> IO ()
-paintColorText color = do
-    (Just w) <- size
-    ANSI.setSGR [ANSI.SetColor ANSI.Background ANSI.Vivid (getColor color)]
+paintColorText :: Ncurses.Window -> ColorPrinter -> IO ()
+paintColorText w color = do
+    [cursesStyle] <- convertStyles [Style DefaultF (getColor color)]
+    wSetStyle w cursesStyle
+    wRefresh w
     let colorText = getColorString color
-    ANSI.setCursorPosition (height w `div` 2) (width w `div` 2 - (length colorText `div` 2))
-    putStr (getColorString color)
-    ANSI.setSGR [ANSI.Reset]
+    printInCenter w colorText 0
+    -- wResetStyle w
 
 gameAction :: Char -> GameEvent
 gameAction ch = case ch of
@@ -67,14 +67,12 @@ gameAction ch = case ch of
     'q' -> EventExit
     _   -> Continue "Please write correct symbol"
 
--- gameAction :: Char - 
-
--- paint :: ColorPrinter -> StateT GameState IO GameEvent
-paint :: ColorPrinter -> IO ()
-paint color = do
-    ANSI.clearScreen
-    paintColorText color
-    printInCenter "Left player (a) or Right player (l) or q(Quit): " 7
+paint :: Ncurses.Window -> ColorPrinter -> IO ()
+paint w color = do
+    wclear w
+    wRefresh w
+    paintColorText w color
+    printInCenter w "Left player (a) or Right player (l) or q(Quit): " 6
 
 ifReadyDo :: Handle -> IO a -> IO (Maybe a)
 ifReadyDo hnd x = hReady hnd >>= f
@@ -108,32 +106,33 @@ getAnswer = do
 anyChar :: IO ()
 anyChar = getChar >> return ()
 
-printScore :: GameState -> IO () 
-printScore (GameState (p1, p2)) = printInCenter ("Player1: " ++ (show p1) ++ ", Player2: " ++ (show p2)) 10
+printScore :: Ncurses.Window -> GameState -> IO () 
+printScore w (GameState (p1, p2)) = printInCenter w ("Player1: " ++ (show p1) ++ ", Player2: " ++ (show p2)) 10
 
-gameLoop :: StateT GameState IO ()
-gameLoop = do
+gameLoop :: Ncurses.Window -> StateT GameState IO ()
+gameLoop w = do
     [x, y] <- lift $ replicateM 2 $ randomRIO (0, pred $ length listOfColors)
     let color = ColorPrinter (listOfColors !! x) (listOfColorStrings !! y)
-    lift $ paint color
-    get >>= lift . printScore
+    lift $ paint w color
+    get >>= lift . printScore w
     answer <- lift $ race (timer 3) getAnswer
     case answer of 
-        (Left _) -> gameLoop 
+        (Left _) -> gameLoop w
         (Right event) -> 
             case event of
                 (EventKeyPress pl) -> isWin pl color
                 (Continue txt)     -> do 
-                    lift $ printInCenter txt 9
+                    lift $ printInCenter w "***Error***" 15
+                    lift $ printInCenter w (txt ++ " (Tap any char or wait 2 sec)") 16
                     lift $ race (timer 2) anyChar
                     return ()
                 EventExit          ->  mzero
     
 main :: IO ()
 main = do
-    ANSI.clearScreen
-    catch (runStateT (forever gameLoop) (GameState (Player1 0, Player2 0))) (\e -> do 
-                                                                                    let exc = e :: IOException
+    w <- initScr
+    catch (runStateT (forever $ gameLoop w) (GameState (Player1 0, Player2 0))) (\e -> do 
+                                                                                    let _ = e :: IOException
                                                                                     return ((), GameState (Player1 0, Player1 0)))
+    endWin
     return ()
-
