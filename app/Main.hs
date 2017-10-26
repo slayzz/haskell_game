@@ -34,11 +34,10 @@ colorToString :: BackgroundColor -> String
 colorToString DarkRedB    = "red"
 colorToString DarkBlueB   = "blue"
 colorToString DarkGreenB  = "green"
--- colorToString ANSI.Yellow = "yellow"
-colorToString WhiteB  = "white"
+colorToString WhiteB      = "white"
 
 listOfColors :: [BackgroundColor]
-listOfColors = [DarkRedB, DarkGreenB, DarkBlueB,{- PurpleB,  DarkCyanB, -} WhiteB]
+listOfColors = [DarkRedB, DarkGreenB, DarkBlueB, {-  DarkCyanB, -} WhiteB]
 
 listOfColorStrings :: [String]
 listOfColorStrings = ["red", "blue", "green", "white"]
@@ -51,14 +50,30 @@ printInCenter w txt i = do
     wAddStr w txt
     wRefresh w
 
+paintSquares :: Window -> Int -> IO ()
+paintSquares w l = scrSize >>= (\size -> mapM_ (paintSquare size) [-1, -1, 0, 0, 1, 1]) >> wRefresh w
+    where 
+        paintSquare (height, width) x = do
+            move (height `div` 2 + x) (width `div` 2 - (l `div` 2) - l)
+            wAddStr w emptyText
+            when (x /= 0) $ do 
+                move (height `div` 2 + x) (width `div` 2 - (l `div` 2))
+                wAddStr w emptyText
+            move (height `div` 2 + x) (width `div` 2 - (l `div` 2) + l )
+            wAddStr w emptyText
+        emptyText = replicate l ' '
+
+
 paintColorText :: Ncurses.Window -> ColorPrinter -> IO ()
 paintColorText w color = do
+    (height, width) <- scrSize  
     [cursesStyle] <- convertStyles [Style DefaultF (getColor color)]
     wSetStyle w cursesStyle
     wRefresh w
     let colorText = getColorString color
     printInCenter w colorText 0
-    -- wResetStyle w
+    paintSquares w (length colorText)
+    wResetStyle w
 
 gameAction :: Char -> GameEvent
 gameAction ch = case ch of
@@ -107,7 +122,9 @@ anyChar :: IO ()
 anyChar = getChar >> return ()
 
 printScore :: Ncurses.Window -> GameState -> IO () 
-printScore w (GameState (p1, p2)) = printInCenter w ("Player1: " ++ (show p1) ++ ", Player2: " ++ (show p2)) 10
+printScore w (GameState (p1, p2)) = do
+    printInCenter w ("***Score***") 9
+    printInCenter w ("Player1: " ++ (show p1) ++ ", Player2: " ++ (show p2)) 10
 
 gameLoop :: Ncurses.Window -> StateT GameState IO ()
 gameLoop w = do
@@ -115,7 +132,7 @@ gameLoop w = do
     let color = ColorPrinter (listOfColors !! x) (listOfColorStrings !! y)
     lift $ paint w color
     get >>= lift . printScore w
-    answer <- lift $ race (timer 3) getAnswer
+    answer <- lift $ race (timer 1) getAnswer
     case answer of 
         (Left _) -> gameLoop w
         (Right event) -> 
@@ -131,6 +148,9 @@ gameLoop w = do
 main :: IO ()
 main = do
     w <- initScr
+    startColor
+    cursSet CursorInvisible
+    useDefaultColors
     catch (runStateT (forever $ gameLoop w) (GameState (Player1 0, Player2 0))) (\e -> do 
                                                                                     let _ = e :: IOException
                                                                                     return ((), GameState (Player1 0, Player1 0)))
