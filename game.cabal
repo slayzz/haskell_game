@@ -36,7 +36,8 @@ executable game-exe
                      , bytestring
                      , directory
                      , filepath
-                     , old-time
+                     , async
+                     , hscurses
   default-language:    Haskell2010
 
 test-suite game-test
